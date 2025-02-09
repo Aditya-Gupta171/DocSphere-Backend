@@ -9,9 +9,10 @@ dotenv.config();
 connectDB();
 
 const app = express();
+const allowedOrigins = ['https://docsphere-alpha.vercel.app'];
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
+  origin: allowedOrigins,
   credentials: true
 }));
 app.use(express.json());
