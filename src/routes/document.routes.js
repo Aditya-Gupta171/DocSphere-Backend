@@ -16,9 +16,9 @@ router.use(authMiddleware);
 router.post('/', createDocument);
 router.get('/', getAllDocuments);
 router.get('/:id', getDocument);
-router.put('/:id', updateDocument);
+router.put('/:id', authMiddleware, updateDocument);
 router.delete('/:id', deleteDocument);
-router.post('/:documentId/invite', inviteCollaborator);
+router.post('/:documentId/invite', authMiddleware, inviteCollaborator);
 router.post('/:documentId/join', acceptInvitation);
 
 export default router;

@@ -6,28 +6,55 @@ const documentSchema = new mongoose.Schema({
     required: true,
     default: 'Untitled Document'
   },
-  content: String,
+  content: {
+    type: String,
+    default: null
+  },
   owner: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
-  inviteLinks: [{
-    email: String,
-    token: String,
-    expiresAt: Date
-  }],
   collaborators: [{
     user: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
+      ref: 'User',
+      required: true
     },
     accessLevel: {
       type: String,
       enum: ['read', 'write'],
       default: 'write'
     }
+  }],
+  inviteLinks: [{
+    email: String,
+    token: String,
+    accessLevel: {
+      type: String,
+      enum: ['read', 'write'],
+      default: 'write'
+    },
+    expiresAt: Date
   }]
-}, { timestamps: true });
+}, {
+  timestamps: true
+});
+
+// Add index for faster invitation queries
+documentSchema.index({ 
+  'inviteLinks.token': 1,
+  'inviteLinks.email': 1 
+});
+
+// Add method to validate invitation
+documentSchema.methods.validateInvite = function(token, email) {
+  return this.inviteLinks.find(
+    invite => 
+      invite.token === token && 
+      invite.email.toLowerCase() === email.toLowerCase() &&
+      invite.expiresAt > new Date()
+  );
+};
 
 export default mongoose.model('Document', documentSchema);

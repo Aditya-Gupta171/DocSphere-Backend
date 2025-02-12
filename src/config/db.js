@@ -3,11 +3,11 @@ import mongoose from 'mongoose';
 const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI, {
-      dbName: "Docsphere", // Specify the database name
+      dbName: "Docsphere",
     });
-    console.log('MongoDB connected...');
+    console.log('MongoDB connected');
   } catch (error) {
-    console.error('MongoDB connection failed:', error.message);
+    console.error('MongoDB connection failed');
     process.exit(1);
   }
 };

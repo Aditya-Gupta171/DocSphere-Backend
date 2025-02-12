@@ -9,47 +9,53 @@ export const setupWebSocket = (server) => {
     }
   });
 
-  const documentUsers = new Map();
+  // Track document connections
+  const documentSessions = new Map();
 
   io.on('connection', (socket) => {
-    console.log('Client connected');
-    // console.log(socket.id);
+    let currentDocument = null;
 
     socket.on('join-document', ({ documentId, user }) => {
-      socket.join(documentId);
-      
-      if (!documentUsers.has(documentId)) {
-        documentUsers.set(documentId, new Map());
+      // Leave previous document if any
+      if (currentDocument) {
+        socket.leave(currentDocument);
+        
+        const sessions = documentSessions.get(currentDocument);
+        if (sessions) {
+          sessions.delete(socket.id);
+          if (sessions.size === 0) {
+            documentSessions.delete(currentDocument);
+          }
+        }
       }
-      
-      documentUsers.get(documentId).set(socket.id, user);
-      
-      io.to(documentId).emit('users-changed', 
-        Array.from(documentUsers.get(documentId).values())
-      );
+
+      // Join new document
+      socket.join(documentId);
+      currentDocument = documentId;
+
+      if (!documentSessions.has(documentId)) {
+        documentSessions.set(documentId, new Map());
+      }
+      documentSessions.get(documentId).set(socket.id, user);
     });
 
-    socket.on('send-changes', (delta, documentId) => {
-      socket.broadcast.to(documentId).emit('receive-changes', delta);
-    });
-
-    socket.on('cursor-move', ({ documentId, cursor, userName }) => {
-      socket.broadcast.to(documentId).emit('cursor-update', {
-        userId: socket.id,
-        cursor,
-        userName
-      });
+    socket.on('send-changes', ({ delta, documentId }) => {
+      if (currentDocument === documentId) {
+        socket.to(documentId).emit('receive-changes', delta);
+      }
     });
 
     socket.on('disconnect', () => {
-      for (const [docId, users] of documentUsers) {
-        if (users.delete(socket.id)) {
-          io.to(docId).emit('users-changed', 
-            Array.from(users.values())
-          );
+      if (currentDocument) {
+        const sessions = documentSessions.get(currentDocument);
+        if (sessions) {
+          sessions.delete(socket.id);
+          if (sessions.size === 0) {
+            documentSessions.delete(currentDocument);
+          }
         }
+        socket.leave(currentDocument);
       }
-      console.log('Client disconnected');
     });
   });
 

@@ -22,6 +22,16 @@ export const getDocument = async (req, res) => {
     if (!doc) {
       return res.status(404).json({ message: 'Document not found' });
     }
+
+    // Check if user has access
+    const isCollaborator = doc.collaborators.find(
+      c => c.user._id.toString() === req.user._id.toString()
+    );
+
+    if (!doc.owner.equals(req.user._id) && !isCollaborator) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
     res.json(doc);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch document' });
@@ -45,22 +55,26 @@ export const getAllDocuments = async (req, res) => {
 export const updateDocument = async (req, res) => {
   try {
     const { content, title } = req.body;
+    
     const doc = await Document.findByIdAndUpdate(
       req.params.id,
       { 
-        ...(content && { content }),
-        ...(title && { title }),
-        lastModified: Date.now()
+        $set: { 
+          ...(content && { content }),
+          ...(title && { title }),
+          lastModified: new Date() 
+        }
       },
       { new: true }
-    );
-    
+    ).populate('collaborators.user', 'name email');
+
     if (!doc) {
       return res.status(404).json({ message: 'Document not found' });
     }
-    res.json(doc);
+
+    res.json({ doc });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to update document' });
+    res.status(500).json({ message: 'Failed to save document' });
   }
 };
 
@@ -81,36 +95,49 @@ export const joinDocument = async (req, res) => {
   try {
     const { documentId } = req.params;
     const { token } = req.body;
+    const userEmail = req.user.email;
 
     const doc = await Document.findById(documentId);
     if (!doc) {
       return res.status(404).json({ message: 'Document not found' });
     }
 
-    // Check if user is owner or already a collaborator
-    if (doc.owner.equals(req.user.id) || 
-        doc.collaborators.some(c => c.user.equals(req.user.id))) {
-      return res.json({ message: 'Already has access' });
-    }
+    // Find invitation for this email
+    const invite = doc.inviteLinks.find(i => 
+      i.token === token && 
+      i.email.toLowerCase() === userEmail.toLowerCase()
+    );
 
-    // Verify invite token
-    const invite = doc.inviteLinks?.find(i => i.token === token);
     if (!invite) {
-      return res.status(401).json({ message: 'Invalid invitation' });
+      return res.status(403).json({ 
+        message: 'Invalid invitation or not authorized to join' 
+      });
     }
 
     if (new Date(invite.expiresAt) < new Date()) {
-      return res.status(401).json({ message: 'Invitation expired' });
+      return res.status(401).json({ message: 'Invitation has expired' });
     }
 
-    // Add as collaborator
+    // Check if already a collaborator
+    const isExistingCollaborator = doc.collaborators.some(
+      c => c.user.toString() === req.user._id.toString()
+    );
+
+    if (isExistingCollaborator) {
+      return res.status(400).json({ message: 'Already a collaborator' });
+    }
+
+    // Add as collaborator with specified access level
     doc.collaborators.push({
-      user: req.user.id,
-      accessLevel: 'write'
+      user: req.user._id,
+      accessLevel: invite.accessLevel
     });
+
+    // Remove used invitation
+    doc.inviteLinks = doc.inviteLinks.filter(i => i.token !== token);
     await doc.save();
 
-    res.json({ message: 'Joined document successfully' });
+    res.json({ message: 'Successfully joined document' });
   } catch (error) {
     console.error('Join document error:', error);
     res.status(500).json({ message: 'Failed to join document' });

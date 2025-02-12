@@ -5,36 +5,42 @@ import { sendInviteEmail } from '../utils/emailService.js';
 export const inviteCollaborator = async (req, res) => {
   try {
     const { documentId } = req.params;
-    const { email } = req.body;
+    const { email, accessLevel } = req.body;
 
-    // Debug logs
-    console.log('Invite Request:', { documentId, email, userId: req.user._id });
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required' });
+    }
 
     const doc = await Document.findById(documentId);
     if (!doc) {
       return res.status(404).json({ message: 'Document not found' });
     }
 
-    // Ownership check
-    if (doc.owner.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Only document owner can invite collaborators' });
+    // Check if already a collaborator
+    const existingCollaborator = doc.collaborators.find(
+      c => c.user.email === email
+    );
+
+    if (existingCollaborator) {
+      return res.status(400).json({ message: 'User is already a collaborator' });
     }
 
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     const inviteLink = `${process.env.FRONTEND_URL}/join/${documentId}/${token}`;
 
-    try {
-      await sendInviteEmail(email, inviteLink, req.user.name || 'A DocSphere user');
+    // Store invitation with access level
+    doc.inviteLinks = [...(doc.inviteLinks || []), {
+      email,
+      token,
+      expiresAt,
+      accessLevel: accessLevel || 'write'
+    }];
 
-      doc.inviteLinks = [...(doc.inviteLinks || []), { email, token, expiresAt }];
-      await doc.save();
+    await doc.save();
+    await sendInviteEmail(email, inviteLink, req.user.name);
 
-      res.json({ message: 'Invitation sent successfully' });
-    } catch (emailError) {
-      console.error('Email error:', emailError);
-      res.status(500).json({ message: 'Failed to send invitation email' });
-    }
+    res.json({ message: 'Invitation sent successfully' });
   } catch (error) {
     console.error('Invitation error:', error);
     res.status(500).json({ message: 'Failed to process invitation' });
@@ -45,34 +51,59 @@ export const acceptInvitation = async (req, res) => {
   try {
     const { documentId } = req.params;
     const { token } = req.body;
+    const userEmail = req.user.email;
+
+    console.log('Accepting invitation:', { documentId, token, userEmail });
 
     const doc = await Document.findById(documentId);
+    
     if (!doc) {
-      return res.status(404).json({ message: 'Document not found' });
-    }
-
-    const invite = doc.inviteLinks?.find(i => i.token === token);
-    if (!invite) {
-      return res.status(401).json({ message: 'Invalid invitation' });
-    }
-
-    if (new Date(invite.expiresAt) < new Date()) {
-      return res.status(401).json({ message: 'Invitation expired' });
-    }
-
-    if (!doc.collaborators.some(c => c.user.toString() === req.user._id.toString())) {
-      doc.collaborators.push({
-        user: req.user._id,
-        accessLevel: 'write'
+      return res.status(404).json({ 
+        message: 'Document not found' 
       });
     }
 
+    // Validate invitation
+    const invite = doc.validateInvite(token, userEmail);
+    
+    if (!invite) {
+      return res.status(404).json({ 
+        message: 'Invalid or expired invitation' 
+      });
+    }
+
+    // Check if already a collaborator
+    const isExistingCollaborator = doc.collaborators.some(
+      c => c.user.toString() === req.user._id.toString()
+    );
+
+    if (isExistingCollaborator) {
+      return res.status(400).json({ 
+        message: 'Already a collaborator' 
+      });
+    }
+
+    // Add as collaborator with correct access level
+    doc.collaborators.push({
+      user: req.user._id,
+      accessLevel: invite.accessLevel
+    });
+
+    // Remove used invitation
     doc.inviteLinks = doc.inviteLinks.filter(i => i.token !== token);
+
     await doc.save();
 
-    res.json({ message: 'Successfully joined document' });
+    res.json({ 
+      message: 'Successfully joined document',
+      document: doc
+    });
+
   } catch (error) {
     console.error('Accept invitation error:', error);
-    res.status(500).json({ message: 'Failed to accept invitation' });
+    res.status(500).json({ 
+      message: 'Failed to join document',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
