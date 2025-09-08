@@ -2,7 +2,9 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/user.model.js';
 import TokenBlacklist from '../models/token.model.js';
+import dotenv from 'dotenv';
 
+dotenv.config();
 
 const generateTokens = (user) => {
   const accessToken = jwt.sign(
